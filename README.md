@@ -85,7 +85,7 @@ esni-rev-proxy -b 0.0.0.0:443 \
 
 This would start up the reverse proxy that:
 1. Accept incoming connections on all interfaces on port 443
-2. Decrypt ESNI and choose appropriate certificate for host name `www.example.com` or `other-domain.com`,
+2. Decrypt ESNI (using `esni.pub` and `esni` public and private key pair) and choose appropriate certificate for host name `www.example.com` or `other-domain.com`,
 stored in `/mycerts`. The key/cert pair specified in first `-cert` flag is also treated as default cert/key pair - 
 so it will be used if no match to SNI host detected.
 3. Forward decrypted traffic to `http://internal-endpoint`
