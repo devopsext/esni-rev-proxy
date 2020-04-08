@@ -180,7 +180,7 @@ func main() {
 	if *arg_upstream != "" {
 		upstreamURL, err = url.Parse(*arg_upstream)
 		if err != nil {
-			log.Fatal("Can't parse upstream URL: %v", err)
+			log.Fatalf("Can't parse upstream URL: %v", err)
 		}
 
 		// create the reverse proxy
@@ -207,7 +207,7 @@ func main() {
 		}
 		esniKeysBytes, err := base64.StdEncoding.DecodeString(string(contents))
 		if err != nil {
-			log.Fatal("Bad -esni-keys: %s", err)
+			log.Fatalf("Bad -esni-keys: %s", err)
 		}
 		esniKeys, err = tls.ParseESNIKeys(esniKeysBytes)
 		if esniKeys == nil {
