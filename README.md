@@ -12,7 +12,7 @@ Approach here would be to build custom GOROOT (that has patched standard librari
 
 Build ___esni reverse proxy___:
 1. `git clone https://github.com/devopsext/esni-rev-proxy.git`
-2. `cd esni-rev-proxy && git checkout v1.0.0` 
+2. `cd esni-rev-proxy && git checkout v1.0.1` 
 3. `prepareGoRoot.sh` - this script create patched GOROOT folder (`.GOROOT/`) in current directory (applicable to Linux/MacOS)
 4. `export GOROOT=$(pwd)/.GOROOT`
 5. `go mod vendor`
