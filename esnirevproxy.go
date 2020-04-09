@@ -46,8 +46,10 @@ type rpTransport struct {
 func (t *rpTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	start := time.Now()
 	resp, err = t.RoundTripper.RoundTrip(req)
-	upstreamHTTPResponseCodesCounterVec.WithLabelValues(req.Host,strconv.Itoa(resp.StatusCode)).Inc()
-	upstreamLatencyCounterVec.WithLabelValues(req.Host).Observe(float64(time.Now().Sub(start).Milliseconds()))
+	if req != nil && resp != nil {
+		upstreamHTTPResponseCodesCounterVec.WithLabelValues(req.Host,strconv.Itoa(resp.StatusCode)).Inc()
+		upstreamLatencyCounterVec.WithLabelValues(req.Host).Observe(float64(time.Now().Sub(start).Milliseconds()))
+	}
 	return resp, err
 }
 
@@ -90,7 +92,7 @@ var (
 			Help: "Total number of successful TLS handshakes",
 		},
 		// Host label (aka SNI)
-		[]string{"host"},
+		[]string{"sni"},
 	)
 
 	tlsHandshakeDurationHist = prometheus.NewHistogram(
@@ -409,8 +411,15 @@ func (s *esniRevProxy) gatherTLSConnStats(c net.Conn, state http.ConnState) {
 		s.connectionStats[remoteAddr]["startedAt"] = time.Now()
 		totalConnectionsGauge.Inc()
 	case http.StateActive:
-		if _, ok := s.connectionStats[remoteAddr]["tlsConnectionID"]; !ok {
-			successfulTLSHandshakesCounterVec.WithLabelValues(tlsConn.ConnectionState().ServerName).Inc()
+		if _, ok := s.connectionStats[remoteAddr]["tlsConnectionID"]; !ok &&
+			tlsConn.ConnectionState().HandshakeComplete {
+			sni :=  tlsConn.ConnectionState().ServerName
+			if sni == "" {
+				sni = reflect.ValueOf(tlsConn.RemoteAddr()).Interface().(*net.TCPAddr).IP.String()
+			}
+
+			successfulTLSHandshakesCounterVec.WithLabelValues(sni).Inc()
+
 			tlsHandshakeDurationHist.Observe(
 				float64(
 					time.Now().
