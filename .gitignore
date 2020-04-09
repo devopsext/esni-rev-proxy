@@ -1,3 +1,6 @@
 GOROOT/
+.GOROOT/
 esnitool/esnitool
 esni-rev-proxy
+build/
+vendor/

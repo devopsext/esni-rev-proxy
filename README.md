@@ -13,9 +13,10 @@ Approach here would be to build custom GOROOT (that has patched standard librari
 Build ___esni reverse proxy___:
 1. `git clone https://github.com/devopsext/esni-rev-proxy.git`
 2. `cd esni-rev-proxy && git checkout v1.0.0` 
-3. `prepareGoRoot.sh` - this script create patched GOROOT folder in current directory (applicable to Linux/MacOS)
-4. `export GOROOT=$(pwd)/GOROOT`
-5. `go build`
+3. `prepareGoRoot.sh` - this script create patched GOROOT folder (`.GOROOT/`) in current directory (applicable to Linux/MacOS)
+4. `export GOROOT=$(pwd)/.GOROOT`
+5. `go mod vendor`
+6. `go build`
 
 Build ___esnitool___ (in case use need to generate esni keys):
 Esnitool source code is copied from cloudflare repo: 
@@ -67,6 +68,9 @@ Usage of ./esni-rev-proxy:
         Show access log
   -upstream string
         Upstream URL to forward traffic to
+  -stats-metrics-bind string
+        Address:port used for binding. Metrics available at /metrics (prometheus format),
+        health-check at /helathz (default "0.0.0.0:8181")
 ```
 Short comments:
 * `-cert` flag used to set SNI name and corresponding cert/key pair, in case your proxy severe several domains, you can specify several values.
@@ -90,3 +94,44 @@ stored in `/mycerts`. The key/cert pair specified in first `-cert` flag is also 
 so it will be used if no match to SNI host detected.
 3. Forward decrypted traffic to `http://internal-endpoint`
 4. Print incoming and forwarded requests in stdout (`-showaccesslog` flag)
+5. Export 2 endpoints `0.0.0.0:8181/metrics` - metrics in prometheus format and
+`0.0.0.0:8181/healthz` - simple http health-check.
+
+---
+__Sample list of metrics in prometheus format:__
+```
+# HELP esnirevproxy_http_average_last_min_rps Incoming HTTP rps average for the last minute
+# TYPE esnirevproxy_http_average_last_min_rps gauge
+esnirevproxy_http_average_last_min_rps 0
+
+# HELP esnirevproxy_http_upstream_latency_msec Upstream latency in milliseconds
+# TYPE esnirevproxy_http_upstream_latency_msec histogram
+# Bucket distribution deleted...
+esnirevproxy_http_upstream_latency_msec_sum{upstream="www.google.com"} 14243
+esnirevproxy_http_upstream_latency_msec_count{upstream="www.google.com"} 20
+
+# HELP esnirevproxy_http_upstream_response_codes Upstream response HTTP codes
+# TYPE esnirevproxy_http_upstream_response_codes counter
+esnirevproxy_http_upstream_response_codes{code="200",upstream="www.google.com"} 7
+esnirevproxy_http_upstream_response_codes{code="204",upstream="www.google.com"} 13
+
+# HELP esnirevproxy_tcp_connections_total Total active/idle connections
+# TYPE esnirevproxy_tcp_connections_total gauge
+esnirevproxy_tcp_connections_total 1
+
+# HELP esnirevproxy_tls_failed_handshakes Total number of failed TLS handshakes
+# TYPE esnirevproxy_tls_failed_handshakes counter
+esnirevproxy_tls_failed_handshakes 1
+
+# HELP esnirevproxy_tls_handshake_duration_msec Handshake time in milliseconds
+# TYPE esnirevproxy_tls_handshake_duration_msec histogram
+# Bucket distribution deleted...
+esnirevproxy_tls_handshake_duration_msec_sum 3
+esnirevproxy_tls_handshake_duration_msec_count 1
+
+# HELP esnirevproxy_tls_successful_handshakes Total number of successful TLS handshakes
+# TYPE esnirevproxy_tls_successful_handshakes counter
+esnirevproxy_tls_successful_handshakes{host="localhost"} 1
+
+#Standard go_ metrics is not printed here.
+```

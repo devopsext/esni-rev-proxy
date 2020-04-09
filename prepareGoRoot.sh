@@ -4,8 +4,8 @@ goHostOS=$(go env GOHOSTOS)
 goHostArch=$(go env GOHOSTARCH)
 installRace=$(go env CGO_ENABLED)
 
-localGoRoot="./GOROOT"
-patchSrc="./patch/src"
+localGoRoot="./.GOROOT"
+patchSrc="./.patch/src"
 
 mkdir -p ${localGoRoot}
 
@@ -45,6 +45,6 @@ if [ ! -d ${localGoRoot}/pkg/tool ]; then
 fi
 
 #echo "Building..."
-#export GOROOT=$(pwd)/GOROOT
+#export GOROOT=$(pwd)/.GOROOT
 #go build
 #export GOROOT=${goRoot}
