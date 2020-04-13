@@ -131,7 +131,7 @@ esnirevproxy_tls_handshake_duration_msec_count 1
 
 # HELP esnirevproxy_tls_successful_handshakes Total number of successful TLS handshakes
 # TYPE esnirevproxy_tls_successful_handshakes counter
-esnirevproxy_tls_successful_handshakes{host="localhost"} 1
+esnirevproxy_tls_successful_handshakes{sni="localhost"} 1
 
 #Standard go_ metrics is not printed here.
 ```
