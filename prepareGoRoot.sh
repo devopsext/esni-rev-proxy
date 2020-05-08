@@ -5,7 +5,7 @@ goHostArch=$(go env GOHOSTARCH)
 installRace=$(go env CGO_ENABLED)
 
 localGoRoot="$1"
-if [[ -z "$localGoRoot" ]]; then
+if [ -z "$localGoRoot" ]; then
   localGoRoot="./.GOROOT"
 fi
 
@@ -34,7 +34,7 @@ rm -rf ${localGoRoot}/pkg/${goHostOS}_${goHostArch}/crypto/tls.a
 rm -rf ${localGoRoot}/pkg/${goHostOS}_${goHostArch}/net/http*
 
 if [ $installRace -eq "1" ]; then
-  if [[ -d "${goRoot}/pkg/${goHostOS}_${goHostArch}_race" ]]; then
+  if [ -d "${goRoot}/pkg/${goHostOS}_${goHostArch}_race" ]; then
 	  cp -rf ${goRoot}/pkg/${goHostOS}_${goHostArch}_race ${localGoRoot}/pkg/
 	fi
 	rm -rf ${localGoRoot}/pkg/${goHostOS}_${goHostArch}_race/crypto/tls.a

@@ -5,16 +5,16 @@ function build() {
 
   local oldGoRoot=$(go env GOROOT)
 
-  if [[ -z "$localGoRoot" ]]; then
+  if [ -z "$localGoRoot" ]; then
     localGoRoot=".GOROOT"
   fi
 
   local output="$2"
-  if [[ -z "$output" ]]; then
+  if [ -z "$output" ]; then
     output="esni-rev-proxy"
   fi
 
-  if [[ ! -d "$localGoRoot" ]]; then
+  if [ ! -d "$localGoRoot" ]; then
     echo "=> Preparing GO ROOT..."
     ./prepareGoRoot.sh "$localGoRoot"
   else
