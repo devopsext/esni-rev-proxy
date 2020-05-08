@@ -4,7 +4,11 @@ goHostOS=$(go env GOHOSTOS)
 goHostArch=$(go env GOHOSTARCH)
 installRace=$(go env CGO_ENABLED)
 
-localGoRoot="./.GOROOT"
+localGoRoot="$1"
+if [[ -z "$localGoRoot" ]]; then
+  localGoRoot="./.GOROOT"
+fi
+
 patchSrc="./.patch/src"
 
 mkdir -p ${localGoRoot}
@@ -30,7 +34,9 @@ rm -rf ${localGoRoot}/pkg/${goHostOS}_${goHostArch}/crypto/tls.a
 rm -rf ${localGoRoot}/pkg/${goHostOS}_${goHostArch}/net/http*
 
 if [ $installRace -eq "1" ]; then
-	cp -rf ${goRoot}/pkg/${goHostOS}_${goHostArch}_race ${localGoRoot}/pkg/
+  if [[ -d "${goRoot}/pkg/${goHostOS}_${goHostArch}_race" ]]; then
+	  cp -rf ${goRoot}/pkg/${goHostOS}_${goHostArch}_race ${localGoRoot}/pkg/
+	fi
 	rm -rf ${localGoRoot}/pkg/${goHostOS}_${goHostArch}_race/crypto/tls.a
 	rm -rf ${localGoRoot}/pkg/${goHostOS}_${goHostArch}_race/net/http*
 fi
@@ -43,8 +49,3 @@ if [ ! -d ${localGoRoot}/pkg/tool ]; then
 	ln -s ${goRoot}/pkg/tool ${localGoRoot}/pkg/tool
 	#cp -rf ${goRoot}/pkg/tool ${localGoRoot}/pkg/
 fi
-
-#echo "Building..."
-#export GOROOT=$(pwd)/.GOROOT
-#go build
-#export GOROOT=${goRoot}
