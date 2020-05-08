@@ -14,7 +14,7 @@ Requests/sec:    705.57
 Transfer/sec:     21.27MB 
 ```
 #### Features
-- Reworked scripts for preparing GOROOT (now accepts 1 input that point out the target folder for prepapred GOROOT)
+- Reworked scripts for preparing GOROOT (now accepts 1 input that point out the target folder for prepared GOROOT)
 - Added `build.sh` - script that prepare GOROOT and build binary.
 - Added script `enable_esni_firefox_darwin.sh` - this is example of script to automate ESNI
 support enablement in fire fox browser
