@@ -35,7 +35,7 @@ type esniRoundTripPayload struct {
 }
 
 func testHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type","application/json")
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(esniRoundTripPayload{Decrypted_sni: r.TLS.ServerName})
 }
 
@@ -48,14 +48,16 @@ func getIDByName(m map[uint16]string, name string) (uint16, error) {
 	return 0, errors.New("Unknown value")
 }
 
-func buildClientTLSConfig(sni string, tlsVersion string,insecure bool,esniKeys string, rootCACert string, namedGroups string) *tls.Config {
+func buildClientTLSConfig(sni string, tlsVersion string, insecure bool, esniKeys string, rootCACert string, namedGroups string) *tls.Config {
 	tlsConfig := &tls.Config{}
 	tlsConfig.InsecureSkipVerify = insecure
 	// ESNI support requires a server name to be set.
 	tlsConfig.ServerName = sni
 
 	tlsID, err := getIDByName(tlsVersionToName, tlsVersion)
-	if err!=nil {log.Fatalf("Unknown tls version %q",tlsVersion)}
+	if err != nil {
+		log.Fatalf("Unknown tls version %q", tlsVersion)
+	}
 	tlsConfig.MinVersion = tlsID
 	tlsConfig.MaxVersion = tlsID
 
@@ -106,7 +108,7 @@ func TestESNIRoundtrip(t *testing.T) {
 	//Creating esni rev proxy
 	s := newESNIRevProxy(
 		"0.0.0.0:443",
-		&arrayFlags{sni +":testData/localhost.key:testData/localhost.crt"},
+		&arrayFlags{sni + ":testData/localhost.key:testData/localhost.crt"},
 		"n",
 		false,
 		"",
@@ -124,27 +126,29 @@ func TestESNIRoundtrip(t *testing.T) {
 
 	//Prepare client with ESNI support and make test request
 	client := http.Client{Transport: &http.Transport{
-		TLSClientConfig:buildClientTLSConfig(
+		TLSClientConfig: buildClientTLSConfig(
 			sni,
-		"1.3",
-		false,
-		"testData/esni.pub",
-		"testData/rootCA.crt" ,
-		"X25519:P-256:P-384:P-521")}}
+			"1.3",
+			false,
+			"testData/esni.pub",
+			"testData/rootCA.crt",
+			"X25519:P-256:P-384:P-521")}}
 	resp, err := client.Get("https://127.0.0.1")
+	defer resp.Body.Close()
+
 	if err != nil {
 		t.Fatalf("handshake failed: %v\n", err)
-	}else {
-		respJson :=esniRoundTripPayload{}
+	} else {
+		respJson := esniRoundTripPayload{}
 		err := json.NewDecoder(resp.Body).Decode(&respJson)
 		if err != nil {
 			t.Fatal("Can't parse response from esni proxy")
 		}
 
 		if respJson.Decrypted_sni != sni {
-			t.Errorf("ESNI Roundrip failed: initial sni value (%q) NOT EQUAL to value decrypted by server (%q)", sni,respJson.Decrypted_sni)
-		}else{ //sni roundtrip successfull
-			t.Logf("ESNI Roundrip successfull: initial sni value (%q) EQUAL to value decrypted by server (%q)", sni,respJson.Decrypted_sni)
+			t.Errorf("ESNI Roundrip failed: initial sni value (%q) NOT EQUAL to value decrypted by server (%q)", sni, respJson.Decrypted_sni)
+		} else { //sni roundtrip successfull
+			t.Logf("ESNI Roundrip successfull: initial sni value (%q) EQUAL to value decrypted by server (%q)", sni, respJson.Decrypted_sni)
 		}
 	}
 

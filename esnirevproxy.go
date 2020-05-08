@@ -16,6 +16,8 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
+	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,31 +42,49 @@ type revProxy struct {
 	reverseProxy *httputil.ReverseProxy
 }
 
+const (
+	tlsNewConn = iota
+	tlsActiveConn
+	tlsClosedConn
+)
+
+type tlsConnEvent struct {
+	remoteAddr string
+	connID     []byte
+	sni        string
+	evType     uint
+	when       time.Time
+}
+
 type rpTransport struct {
 	http.RoundTripper
 }
+
 func (t *rpTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	start := time.Now()
 	resp, err = t.RoundTripper.RoundTrip(req)
 	if req != nil && resp != nil {
-		upstreamHTTPResponseCodesCounterVec.WithLabelValues(req.Host,strconv.Itoa(resp.StatusCode)).Inc()
+		upstreamHTTPResponseCodesCounterVec.WithLabelValues(req.Host, strconv.Itoa(resp.StatusCode)).Inc()
 		upstreamLatencyCounterVec.WithLabelValues(req.Host).Observe(float64(time.Now().Sub(start).Milliseconds()))
 	}
 	return resp, err
 }
 
 type esniRevProxy struct {
+	httpServer *http.Server
+	wgServer   sync.WaitGroup
 
-	httpServer      *http.Server
 	httpStatsServer *http.Server
-	rp              *revProxy
-	showAccessLog   bool
-	wg              sync.WaitGroup
+	wgStatServer    sync.WaitGroup
+
+	rp            *revProxy
+	showAccessLog bool
 
 	//stats
-	connectionStats           map[string]map[string]interface{}
-	counter                   *ratecounter.RateCounter // RPS counting
-	rpsTickerDone chan bool
+	wg               sync.WaitGroup
+	counter          *ratecounter.RateCounter // RPS counting
+	rpsTickerDone    chan bool
+	tslConnEventChan chan tlsConnEvent
 }
 
 var tlsVersionToName = map[uint16]string{
@@ -80,16 +100,16 @@ var (
 		prometheus.CounterOpts{
 			Namespace: "esnirevproxy",
 			Subsystem: "tls",
-			Name: "failed_handshakes",
-			Help: "Total number of failed TLS handshakes",
+			Name:      "failed_handshakes",
+			Help:      "Total number of failed TLS handshakes",
 		},
 	)
 	successfulTLSHandshakesCounterVec = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "esnirevproxy",
 			Subsystem: "tls",
-			Name: "successful_handshakes",
-			Help: "Total number of successful TLS handshakes",
+			Name:      "successful_handshakes",
+			Help:      "Total number of successful TLS handshakes",
 		},
 		// Host label (aka SNI)
 		[]string{"sni"},
@@ -99,16 +119,16 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: "esnirevproxy",
 			Subsystem: "tls",
-			Buckets: []float64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000},
-			Name: "handshake_duration_msec",
-			Help: "Handshake time in milliseconds",})
+			Buckets:   []float64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000},
+			Name:      "handshake_duration_msec",
+			Help:      "Handshake time in milliseconds"})
 
 	totalConnectionsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "esnirevproxy",
 			Subsystem: "tcp",
-			Name: "connections_total",
-			Help: "Total active/idle connections",
+			Name:      "connections_total",
+			Help:      "Total active/idle connections",
 		},
 	)
 
@@ -116,26 +136,26 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: "esnirevproxy",
 			Subsystem: "http",
-			Name: "average_last_min_rps",
-			Help: "Incoming HTTP rps average for the last minute",})
+			Name:      "average_last_min_rps",
+			Help:      "Incoming HTTP rps average for the last minute"})
 
 	upstreamHTTPResponseCodesCounterVec = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "esnirevproxy",
 			Subsystem: "http",
-			Name: "upstream_response_codes",
-			Help: "Upstream response HTTP codes",
+			Name:      "upstream_response_codes",
+			Help:      "Upstream response HTTP codes",
 		},
-		[]string{"upstream","code"},
+		[]string{"upstream", "code"},
 	)
 
 	upstreamLatencyCounterVec = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "esnirevproxy",
 			Subsystem: "http",
-			Buckets: []float64{ 100, 500, 1000, 2500, 5000, 10000},
-			Name: "upstream_latency_msec",
-			Help: "Upstream latency in milliseconds",},
+			Buckets:   []float64{100, 500, 1000, 2500, 5000, 10000},
+			Name:      "upstream_latency_msec",
+			Help:      "Upstream latency in milliseconds"},
 		[]string{"upstream"},
 	)
 )
@@ -143,7 +163,11 @@ var (
 type arrayFlags []string
 
 func (i *arrayFlags) String() string {
-	return "my string representation"
+	if i == nil {
+		return ""
+	}
+	return strings.Join(*i, ",")
+
 }
 
 func (i *arrayFlags) Set(value string) error {
@@ -281,18 +305,16 @@ func newESNIRevProxy(
 	}
 
 	rp := revProxy{
-		upstreamURL:     upstreamURL,
-		reverseProxy:    httputil.NewSingleHostReverseProxy(upstreamURL),
-
+		upstreamURL:  upstreamURL,
+		reverseProxy: httputil.NewSingleHostReverseProxy(upstreamURL),
 	}
 	//Set round tripper to get upstream statistics
 	rp.reverseProxy.Transport = &rpTransport{http.DefaultTransport}
 
 	s := new(esniRevProxy)
 
-	s.connectionStats = map[string]map[string]interface{}{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.requestHandler)
+	mux.Handle("/", http.HandlerFunc(s.requestHandler))
 	s.httpServer = &http.Server{
 		Addr:      address,
 		Handler:   mux,
@@ -300,8 +322,8 @@ func newESNIRevProxy(
 		TLSConfig: buildTLSConig(sniCertsChain, argZeroRTT, clientAuth, pq, esniPrivateKeyFile, esniKeysFile)}
 
 	muxStats := http.NewServeMux()
-	muxStats.Handle("/metrics",promhttp.Handler())
-	muxStats.HandleFunc("/healthz", s.healthzHandler)
+	muxStats.Handle("/metrics", promhttp.Handler())
+	muxStats.Handle("/healthz", http.HandlerFunc(s.healthzHandler))
 	s.httpStatsServer = &http.Server{
 		Addr:    addrStats,
 		Handler: muxStats,
@@ -315,18 +337,19 @@ func newESNIRevProxy(
 func (s *esniRevProxy) start() {
 	log.Println("Starting esni reverse proxy...")
 	//Primary
-	s.wg.Add(1)
+	s.wgServer.Add(1)
+	s.tslConnEventChan = make(chan tlsConnEvent)
 	go func() {
-		defer s.wg.Done()
+		defer s.wgServer.Done()
 		if err := s.httpServer.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
 			log.Fatalf("ListenAndServeTLS(): %v", err)
 		}
 	}()
 
 	//Stats & healthz
-	s.wg.Add(1)
+	s.wgStatServer.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer s.wgStatServer.Done()
 		if err := s.httpStatsServer.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatalf("ListenAndServe(): %v", err)
 		}
@@ -334,7 +357,7 @@ func (s *esniRevProxy) start() {
 
 	//rps counter
 	s.wg.Add(1)
-	s.rpsTickerDone = make (chan bool)
+	s.rpsTickerDone = make(chan bool)
 	go func() {
 		rpsTicker := time.NewTicker(time.Second)
 		defer rpsTicker.Stop()
@@ -345,28 +368,68 @@ func (s *esniRevProxy) start() {
 			case <-s.rpsTickerDone:
 				return
 			case <-rpsTicker.C:
-				rpsGauge.Set(float64(s.counter.Rate())/60)
+				rpsGauge.Set(float64(s.counter.Rate()) / 60)
 			}
 		}
 	}()
+
+	//tls handshake duration counter
+	s.wg.Add(1)
+	go func(connEvents <-chan tlsConnEvent) {
+		defer s.wg.Done()
+
+		connectionStats := map[string]map[string]interface{}{}
+
+		for event := range connEvents {
+			remoteAddr := event.remoteAddr
+			if remoteAddr == "" {
+				continue
+			}
+			switch event.evType {
+			case tlsNewConn:
+				connectionStats[remoteAddr] = map[string]interface{}{}
+				connectionStats[remoteAddr]["startedAt"] = event.when
+			case tlsActiveConn:
+				if _, ok := connectionStats[remoteAddr]["tlsConnectionID"]; !ok {
+					successfulTLSHandshakesCounterVec.WithLabelValues(event.sni).Inc()
+					tlsHandshakeDurationHist.Observe(
+						float64(
+							event.when.
+								Sub(connectionStats[remoteAddr]["startedAt"].(time.Time)).Milliseconds()))
+
+					connectionStats[remoteAddr]["tlsConnectionID"] = event.connID
+				}
+			case tlsClosedConn:
+				delete(connectionStats, remoteAddr)
+			}
+		}
+	}(s.tslConnEventChan)
 
 }
 
 func (s *esniRevProxy) stop() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		log.Printf("Can't graceful shutdown server: %v", err)
+		s.httpServer.Close()
 	}
+	s.wgServer.Wait()
+
 	if err := s.httpStatsServer.Shutdown(ctx); err != nil {
 		log.Printf("Can't graceful shutdown healthz/metrics server: %v", err)
+		s.httpStatsServer.Close()
 	}
+	s.wgStatServer.Wait()
 
 	//Stopping rps counter
 	close(s.rpsTickerDone)
 
-	s.wg.Wait()
+	//Stopping tls handshake duration counter
+	close(s.tslConnEventChan)
 
+	s.wg.Wait()
 }
 
 func (s *esniRevProxy) requestHandler(w http.ResponseWriter, r *http.Request) {
@@ -407,28 +470,32 @@ func (s *esniRevProxy) gatherTLSConnStats(c net.Conn, state http.ConnState) {
 
 	switch state {
 	case http.StateNew:
-		s.connectionStats[remoteAddr] = map[string]interface{}{}
-		s.connectionStats[remoteAddr]["startedAt"] = time.Now()
+		s.tslConnEventChan <- tlsConnEvent{
+			remoteAddr: remoteAddr,
+			evType:     tlsNewConn,
+			when:       time.Now(),
+		}
 		totalConnectionsGauge.Inc()
 	case http.StateActive:
-		if _, ok := s.connectionStats[remoteAddr]["tlsConnectionID"]; !ok &&
-			tlsConn.ConnectionState().HandshakeComplete {
-			sni :=  tlsConn.ConnectionState().ServerName
+		if tlsConn.ConnectionState().HandshakeComplete {
+			sni := tlsConn.ConnectionState().ServerName
 			if sni == "" {
 				sni = reflect.ValueOf(tlsConn.RemoteAddr()).Interface().(*net.TCPAddr).IP.String()
 			}
-
-			successfulTLSHandshakesCounterVec.WithLabelValues(sni).Inc()
-
-			tlsHandshakeDurationHist.Observe(
-				float64(
-					time.Now().
-					Sub(s.connectionStats[remoteAddr]["startedAt"].(time.Time)).Milliseconds()))
-
-			s.connectionStats[remoteAddr]["tlsConnectionID"] = tlsConn.ConnectionState().ConnectionID
+			s.tslConnEventChan <- tlsConnEvent{
+				remoteAddr: remoteAddr,
+				connID:     tlsConn.ConnectionState().ConnectionID,
+				sni:        sni,
+				evType:     tlsActiveConn,
+				when:       time.Now(),
+			}
 		}
+
 	case http.StateClosed:
-		delete(s.connectionStats, remoteAddr)
+		s.tslConnEventChan <- tlsConnEvent{
+			remoteAddr: remoteAddr,
+			evType:     tlsClosedConn,
+		}
 		totalConnectionsGauge.Dec()
 
 		//connection closed without established TLS handshake,
@@ -455,7 +522,23 @@ func main() {
 	arg_upstream := flag.String("upstream", "", "Upstream URL to forward traffic to")
 	arg_accesslog := flag.Bool("showaccesslog", false, "Show access log")
 	arg_addrStats := flag.String("stats-metrics-bind", "0.0.0.0:8181", "Address:port used for binding. Metrics available at /metrics (prometheus format), health-check at /helathz")
+
+	arg_cpuProfile := flag.String("cpuprof", "", "CPU profile output file")
+	arg_memProfile := flag.String("memprof", "", "Memory profile output file")
+
 	flag.Parse()
+
+	if *arg_cpuProfile != "" {
+		f, err := os.Create(*arg_cpuProfile)
+		if err != nil {
+			log.Fatal("could not create CPU profile: ", err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Fatal("could not start CPU profile: ", err)
+		}
+		defer pprof.StopCPUProfile()
+	}
 
 	if *arg_esniPrivate == "" && *arg_esniKeys != "" ||
 		*arg_esniPrivate != "" && *arg_esniKeys == "" {
@@ -486,6 +569,18 @@ func main() {
 	case <-term:
 		log.Println("Received SIGTERM, exiting gracefully...")
 		s.stop()
+	}
+
+	if *arg_memProfile != "" {
+		f, err := os.Create(*arg_memProfile)
+		if err != nil {
+			log.Fatal("could not create memory profile: ", err)
+		}
+		defer f.Close()
+		runtime.GC() // get up-to-date statistics
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			log.Fatal("could not write memory profile: ", err)
+		}
 	}
 
 }
