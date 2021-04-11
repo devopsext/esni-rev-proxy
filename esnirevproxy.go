@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"flag"
+	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"io/ioutil"
 	"log"
@@ -46,6 +47,12 @@ const (
 	tlsNewConn = iota
 	tlsActiveConn
 	tlsClosedConn
+)
+
+var (
+	version string
+	commit  string
+	branch  string
 )
 
 type tlsConnEvent struct {
@@ -510,6 +517,8 @@ func (s *esniRevProxy) gatherTLSConnStats(c net.Conn, state http.ConnState) {
 
 func main() {
 	var arg_sniCertsChain arrayFlags
+	//Setting up flags
+	arg_version := flag.Bool("version", false, "Print version")
 
 	arg_addr := flag.String("b", "0.0.0.0:443", "Address:port used for binding")
 	flag.Var(&arg_sniCertsChain, "cert", "Triplet of SNI:PrivateKey.File:CertChain.File")
@@ -527,6 +536,11 @@ func main() {
 	arg_memProfile := flag.String("memprof", "", "Memory profile output file")
 
 	flag.Parse()
+
+	if *arg_version {
+		fmt.Printf("esni-rev-proxy version: %s, branch: %s, commit: %s\n", version, branch, commit)
+		return
+	}
 
 	if *arg_cpuProfile != "" {
 		f, err := os.Create(*arg_cpuProfile)

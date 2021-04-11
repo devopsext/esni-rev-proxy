@@ -49,28 +49,33 @@ you need to rotate key pair.
 3. Run `esni-reverse-proxy` in front of your web server, to accept and terminate TLS 1.3 with ESNI,
 and forward decrypted traffic to your web-server. `esni-rev-proxy` has self explanatory flags:
 ```
-Usage of ./esni-rev-proxy:
+Usage of esni-rev-proxy:
   -b string
         Address:port used for binding (default "0.0.0.0:443")
   -cert value
         Triplet of SNI:PrivateKey.File:CertChain.File
   -cliauth
         Performs client authentication (RequireAndVerifyClientCert used)
+  -cpuprof string
+        CPU profile output file
   -esni-keys string
         File with base64-encoded ESNIKeys
   -esni-private string
         Private key file for ESNI
+  -memprof string
+        Memory profile output file
   -pq string
         Enable quantum-resistant algorithms [c: Support classical and Quantum-Resistant, q: Enable Quantum-Resistant only]
   -rtt0 string
         0-RTT, accepts following values [n: None, a: Accept, o: Offer, oa: Offer and Accept] (default "n")
   -showaccesslog
         Show access log
+  -stats-metrics-bind string
+        Address:port used for binding. Metrics available at /metrics (prometheus format), health-check at /helathz (default "0.0.0.0:8181")
   -upstream string
         Upstream URL to forward traffic to
-  -stats-metrics-bind string
-        Address:port used for binding. Metrics available at /metrics (prometheus format),
-        health-check at /helathz (default "0.0.0.0:8181")
+  -version
+        Print version
 ```
 Short comments:
 * `-cert` flag used to set SNI name and corresponding cert/key pair, in case your proxy severe several domains, you can specify several values.
